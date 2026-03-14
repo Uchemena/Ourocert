@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  /* New design system */
+  --color-primary: #3B5BDB;
+
+  /* Legacy aliases — keep old class names working during migration */
+  --color-navy: #3B5BDB;
+  --color-soft-blue: #3B5BDB;
+
+  --font-sans: var(--font-outfit);
+}
+
+body {
+  background-color: #F7F8FC;
+}
