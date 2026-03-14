@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+.env.local.example
 
 
 # vercel
@@ -52,6 +53,7 @@ SESSION_11_SETTINGS_COMPLETE.md
 STRIPE_PRICE_IDS.md
 SUPABASE_SETUP.md
 INTEGRATION_EXAMPLES.md
+MIGRATION_RENUMBERING_GUIDE.md
 
 # temporary files
 file
