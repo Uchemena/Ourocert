@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2026-02-25.clover'
+  apiVersion: '2024-12-18.acacia' as any
 })
 
 // Use service role key for webhook handler (bypasses RLS)
@@ -44,10 +44,23 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // ── Fix 5: Deduplicate webhook events ─────────────────────────────────────
+    // Insert the event ID — unique constraint causes a 23505 error if it was
+    // already processed, so we can safely ignore duplicate deliveries.
+    const { error: dupError } = await supabase
+      .from('webhook_events')
+      .insert({ stripe_event_id: event.id })
+
+    if (dupError?.code === '23505') {
+      console.log(`Duplicate webhook event ignored: ${event.id}`)
+      return NextResponse.json({ received: true })
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session
-        
+
         if (session.mode === 'subscription') {
           // Handle subscription creation
           const subscriptionId = session.subscription as string
@@ -66,23 +79,14 @@ export async function POST(request: NextRequest) {
             .eq('id', session.metadata?.user_id)
 
         } else if (session.mode === 'payment') {
-          // Handle one-time payment for batch
-          // Add 100 certificates to user's allowance
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('certificates_used_this_month')
-            .eq('id', session.metadata?.user_id)
-            .single()
-
-          if (profile) {
-            // Reset usage to allow for the purchased batch
-            await supabase
-              .from('profiles')
-              .update({
-                certificates_used_this_month: Math.max(0, (profile.certificates_used_this_month || 0) - 100)
-              })
-              .eq('id', session.metadata?.user_id)
-          }
+          // ── Fix 8B: Grant one batch credit per one-time payment ─────────────
+          // The old logic subtracted from certificates_used_this_month which
+          // was broken (usage was never incremented, so it was always 0).
+          // Now we use a dedicated batch_credits column instead.
+          await supabase.rpc('increment_batch_credits', {
+            p_user_id: session.metadata?.user_id
+          })
+          // ───────────────────────────────────────────────────────────────────
         }
         break
       }
@@ -111,7 +115,8 @@ export async function POST(request: NextRequest) {
           .update({
             plan: 'free',
             subscription_status: 'canceled',
-            stripe_subscription_id: null
+            stripe_subscription_id: null,
+            certificates_used_this_month: 0
           })
           .eq('stripe_subscription_id', subscription.id)
         break

@@ -27,6 +27,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
     }
 
+    const edgeFunctionUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL! + '/functions/v1/generate-certificates'
+
     // If certificateId provided, retry single certificate
     if (certificateId) {
       const { data: certificate } = await supabase
@@ -43,26 +46,21 @@ export async function POST(request: NextRequest) {
       // Reset certificate status to pending
       await supabase
         .from('certificates')
-        .update({ 
+        .update({
           status: 'pending',
           error_message: null,
           file_url: null
         })
         .eq('id', certificateId)
 
-      // Trigger Edge Function for this certificate
-      const edgeFunctionUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!.replace(
-        'https://',
-        'https://'
-      ) + '/functions/v1/generate-certificate'
-
+      // Trigger Edge Function — pass batch_id so it picks up the reset cert
       await fetch(edgeFunctionUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
         },
-        body: JSON.stringify({ certificateId: certificate.id })
+        body: JSON.stringify({ batch_id: batchId })
       })
 
       return NextResponse.json({ success: true })
@@ -83,39 +81,32 @@ export async function POST(request: NextRequest) {
     const certIds = failedCerts.map(c => c.id)
     await supabase
       .from('certificates')
-      .update({ 
+      .update({
         status: 'pending',
         error_message: null,
         file_url: null
       })
       .in('id', certIds)
 
-    // Update batch status to processing
+    // Update batch status to generating
     await supabase
       .from('batches')
-      .update({ status: 'processing' })
+      .update({ status: 'generating' })
       .eq('id', batchId)
 
-    // Trigger Edge Function for each failed certificate
-    const edgeFunctionUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!.replace(
-      'https://',
-      'https://'
-    ) + '/functions/v1/generate-certificate'
+    // Trigger Edge Function once — it processes all pending certs in the batch
+    await fetch(edgeFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+      },
+      body: JSON.stringify({ batch_id: batchId })
+    })
 
-    for (const cert of failedCerts) {
-      await fetch(edgeFunctionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-        },
-        body: JSON.stringify({ certificateId: cert.id })
-      })
-    }
-
-    return NextResponse.json({ 
-      success: true, 
-      retriedCount: failedCerts.length 
+    return NextResponse.json({
+      success: true,
+      retriedCount: failedCerts.length
     })
 
   } catch (error) {

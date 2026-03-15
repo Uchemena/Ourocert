@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     const { data: profile } = await supabase
       .from('profiles')
       .select('logo_url')
-      .eq('user_id', user.id)
+      .eq('id', user.id)
       .single()
 
     if (profile?.logo_url) {
@@ -85,7 +85,7 @@ export async function POST(request: Request) {
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ logo_url: publicUrl })
-      .eq('user_id', user.id)
+      .eq('id', user.id)
 
     if (updateError) {
       console.error('Error updating profile with logo URL:', updateError)

@@ -37,7 +37,7 @@ export async function POST(request: Request) {
         default_email_message,
         default_email_signature: default_email_signature || '',
       })
-      .eq('user_id', user.id)
+      .eq('id', user.id)
       .select()
       .single()
 

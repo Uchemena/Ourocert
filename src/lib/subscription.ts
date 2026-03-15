@@ -15,35 +15,35 @@ export type PlanLimits = {
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
   free: {
     certificates: 25,
-    templates: 1,
-    teamMembers: 1,
-    customBranding: false,
-    customEmailDomain: false,
-    whiteLabel: false,
-    apiAccess: false
+    templates: Infinity,
+    teamMembers: Infinity,
+    customBranding: true,
+    customEmailDomain: true,
+    whiteLabel: true,
+    apiAccess: true
   },
   starter: {
     certificates: 300,
-    templates: 5,
-    teamMembers: 1,
+    templates: Infinity,
+    teamMembers: Infinity,
     customBranding: true,
-    customEmailDomain: false,
-    whiteLabel: false,
-    apiAccess: false
+    customEmailDomain: true,
+    whiteLabel: true,
+    apiAccess: true
   },
   growth: {
     certificates: 1500,
     templates: Infinity,
-    teamMembers: 1,
+    teamMembers: Infinity,
     customBranding: true,
     customEmailDomain: true,
-    whiteLabel: false,
-    apiAccess: false
+    whiteLabel: true,
+    apiAccess: true
   },
   pro: {
     certificates: Infinity,
     templates: Infinity,
-    teamMembers: 5,
+    teamMembers: Infinity,
     customBranding: true,
     customEmailDomain: true,
     whiteLabel: true,

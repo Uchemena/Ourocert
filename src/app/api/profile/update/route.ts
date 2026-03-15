@@ -33,7 +33,7 @@ export async function POST(request: Request) {
         org_name,
         industry,
       })
-      .eq('user_id', user.id)
+      .eq('id', user.id)
       .select()
       .single()
 

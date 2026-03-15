@@ -1,3 +1,4 @@
+// src/app/(app)/templates/new/upload/UploadEditor.tsx
 'use client'
 
 import { useState, useRef } from 'react'
@@ -5,6 +6,8 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { CSSProperties, ChangeEvent, DragEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import ErrorMessage from '@/components/ErrorMessage'
+import type { RichError } from '@/components/ErrorMessage'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -102,7 +105,7 @@ export default function UploadEditor() {
   // Step 3
   const [templateName, setTemplateName] = useState('')
   const [saving, setSaving]             = useState(false)
-  const [saveError, setSaveError]       = useState<string | null>(null)
+  const [saveError, setSaveError]       = useState<RichError | null>(null)
 
   // ── File handling ────────────────────────────────────────────────────────
 
@@ -182,6 +185,19 @@ export default function UploadEditor() {
     setSaveError(null)
 
     try {
+      const limitRes = await fetch('/api/templates/check-limit')
+      const limitData = await limitRes.json()
+      if (limitData.atLimit) {
+        setSaveError({
+          tier: 'user',
+          title: 'Template limit reached',
+          message: `You've reached the template limit for your plan (${limitData.limit}). Please upgrade to create more templates.`,
+          action: { label: 'Upgrade plan', onClick: () => router.push('/settings') },
+        })
+        setSaving(false)
+        return
+      }
+
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not authenticated')
 
@@ -212,7 +228,13 @@ export default function UploadEditor() {
 
       router.push('/templates')
     } catch {
-      setSaveError('Something went wrong saving your template. Please try again.')
+      setSaveError({
+        tier: 'system',
+        title: "Couldn't save your template",
+        message: "Your template couldn't be saved right now. Please try again — your design has not been lost.",
+        action: { label: 'Try again', onClick: handleSave },
+        showSupport: true,
+      })
       setSaving(false)
     }
   }
@@ -529,7 +551,7 @@ export default function UploadEditor() {
             </div>
 
             {saveError && (
-              <p className="text-xs text-red-500">{saveError}</p>
+              <ErrorMessage {...saveError} />
             )}
 
             {/* Actions */}

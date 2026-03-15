@@ -1,9 +1,12 @@
+// src/app/(app)/batch/new/BatchWizard.tsx
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Image from 'next/image'
+import ErrorMessage from '@/components/ErrorMessage'
+import type { RichError } from '@/components/ErrorMessage'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,7 +38,139 @@ interface RecipientRow {
 }
 
 interface ColumnMapping {
-  [fieldName: string]: string // maps template field name to CSV column name
+  [fieldName: string]: string
+}
+
+interface ContactList {
+  id: string
+  name: string
+  description?: string
+}
+
+interface Contact {
+  id: string
+  name: string
+  email?: string
+  extra_data: Record<string, string>
+}
+
+// ─── ContactListPicker Modal ──────────────────────────────────────────────────
+
+function ContactListPicker({
+  onClose,
+  onSelect,
+}: {
+  onClose: () => void
+  onSelect: (recipients: RecipientRow[]) => void
+}) {
+  const supabase = createClient()
+  const [lists, setLists] = useState<ContactList[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadingContacts, setLoadingContacts] = useState(false)
+  const [selectedListId, setSelectedListId] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function load() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase
+        .from('contact_lists')
+        .select('id, name, description')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+      setLists((data as ContactList[]) || [])
+      setLoading(false)
+    }
+    load()
+  }, [])
+
+  async function handleSelectList(listId: string) {
+    setSelectedListId(listId)
+    setLoadingContacts(true)
+    try {
+      const { data } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('list_id', listId)
+      const contacts = (data as Contact[]) || []
+      const rows: RecipientRow[] = contacts.map(contact => ({
+        Name: contact.name,
+        Email: contact.email || '',
+        ...((contact.extra_data as Record<string, string>) || {}),
+      }))
+      onSelect(rows)
+    } finally {
+      setLoadingContacts(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-xl w-full max-w-md p-6"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-bold text-gray-900">Use a saved contact list</h2>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+          >
+            ×
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="py-8 flex items-center justify-center">
+            <svg className="animate-spin h-6 w-6 text-primary" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+          </div>
+        ) : lists.length === 0 ? (
+          <div className="py-8 text-center">
+            <p className="text-sm text-gray-500 mb-2">No contact lists yet</p>
+            <p className="text-xs text-gray-400">
+              Go to Contacts to create your first list
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-80 overflow-y-auto">
+            {lists.map(list => (
+              <button
+                key={list.id}
+                onClick={() => handleSelectList(list.id)}
+                disabled={loadingContacts}
+                className={`w-full text-left p-3 rounded-xl border transition ${
+                  selectedListId === list.id
+                    ? 'border-primary bg-primary/5'
+                    : 'border-[#E8ECF4] hover:border-primary/40 hover:bg-gray-50'
+                } disabled:opacity-60`}
+              >
+                <p className="text-sm font-semibold text-gray-900">{list.name}</p>
+                {list.description && (
+                  <p className="text-xs text-gray-400 mt-0.5">{list.description}</p>
+                )}
+                {loadingContacts && selectedListId === list.id && (
+                  <p className="text-xs text-primary mt-1">Loading contacts...</p>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <button
+          onClick={onClose}
+          className="mt-4 w-full py-2 rounded-[10px] border border-[#E8ECF4] text-sm font-medium text-gray-500 hover:bg-gray-50 transition"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -45,9 +180,11 @@ export default function BatchWizard() {
   const supabase = createClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const mounted = useRef(true)
+
   const [step, setStep] = useState<Step>(1)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [richError, setRichError] = useState<RichError | null>(null)
 
   // Step 1: Template selection
   const [templates, setTemplates] = useState<Template[]>([])
@@ -60,7 +197,12 @@ export default function BatchWizard() {
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({})
   const [needsMapping, setNeedsMapping] = useState(false)
   const [batchName, setBatchName] = useState<string>('')
+  const [category, setCategory] = useState('')
   const [validationErrors, setValidationErrors] = useState<number[]>([])
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    batchName: string; sentAt: string; overlap: number
+  } | null>(null)
+  const [showContactPicker, setShowContactPicker] = useState(false)
 
   // Step 3: Preview
   const [previewRecipients, setPreviewRecipients] = useState<RecipientRow[]>([])
@@ -69,12 +211,17 @@ export default function BatchWizard() {
   const [emailSubject, setEmailSubject] = useState<string>('')
   const [emailMessage, setEmailMessage] = useState<string>('')
   const [orgName, setOrgName] = useState<string>('')
+  const [expiryDate, setExpiryDate] = useState('')
+  const [sendOption, setSendOption] = useState<'now' | 'scheduled'>('now')
+  const [scheduledFor, setScheduledFor] = useState('')
 
   // ─── Load templates ───────────────────────────────────────────────────────
 
   useEffect(() => {
+    mounted.current = true
     loadTemplates()
     loadProfile()
+    return () => { mounted.current = false }
   }, [])
 
   async function loadTemplates() {
@@ -118,18 +265,66 @@ export default function BatchWizard() {
     }
   }
 
+  // ─── Check for duplicate sends ───────────────────────────────────────────
+
+  async function checkForDuplicates(emails: string[]) {
+    if (!emails.length) return
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      // Find recent batches (last 30 days) with sent status
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      const { data: recentBatches } = await supabase
+        .from('batches')
+        .select('id, name, created_at')
+        .eq('user_id', user.id)
+        .eq('status', 'sent')
+        .gte('created_at', thirtyDaysAgo)
+        .order('created_at', { ascending: false })
+        .limit(20)
+
+      if (!recentBatches?.length) return
+
+      for (const batch of recentBatches) {
+        const { data: certs } = await supabase
+          .from('certificates')
+          .select('recipient_email')
+          .eq('batch_id', batch.id)
+          .in('recipient_email', emails)
+
+        const overlap = certs?.length || 0
+        if (overlap > 0) {
+          setDuplicateWarning({
+            batchName: batch.name,
+            sentAt: new Date(batch.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            overlap,
+          })
+          return
+        }
+      }
+    } catch (err) {
+      console.error('Duplicate check failed:', err)
+    }
+  }
+
   // ─── Step 1: Select template ─────────────────────────────────────────────
 
   function handleSelectTemplate(template: Template) {
     setSelectedTemplate(template)
-    setError(null)
+    setRichError(null)
   }
 
   function handleStep1Continue() {
     if (!selectedTemplate) {
-      setError('Please select a template to continue')
+      setRichError({
+        tier: 'user',
+        title: 'No template selected',
+        message: 'Please select a template to continue.',
+      })
       return
     }
+    setRichError(null)
     setBatchName(`Batch — ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`)
     setStep(2)
   }
@@ -141,14 +336,12 @@ export default function BatchWizard() {
 
     const headers = selectedTemplate.fields.map(f => f.name)
     const sampleRow = headers.map(h => `Sample ${h}`)
-    
+
     const csvContent = [
       headers.join(','),
       sampleRow.join(','),
       sampleRow.join(','),
-    ].join
-
-('\n')
+    ].join('\n')
 
     const blob = new Blob([csvContent], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -164,7 +357,11 @@ export default function BatchWizard() {
     if (!file) return
 
     if (!file.name.match(/\.(csv|xlsx|xls)$/i)) {
-      setError('Please upload a CSV or Excel file')
+      setRichError({
+        tier: 'user',
+        title: 'Unsupported file type',
+        message: 'Please upload a CSV or Excel file (.csv, .xlsx, .xls).',
+      })
       return
     }
 
@@ -176,9 +373,13 @@ export default function BatchWizard() {
     try {
       const text = await file.text()
       const lines = text.trim().split('\n')
-      
+
       if (lines.length < 2) {
-        setError('CSV file is empty or has no data rows')
+        setRichError({
+          tier: 'user',
+          title: 'Empty file',
+          message: 'CSV file is empty or has no data rows. Please add at least one recipient.',
+        })
         return
       }
 
@@ -200,7 +401,7 @@ export default function BatchWizard() {
       // Check if we need column mapping
       if (selectedTemplate) {
         const templateFieldNames = selectedTemplate.fields.map(f => f.name)
-        const allMatch = templateFieldNames.every(fieldName => 
+        const allMatch = templateFieldNames.every(fieldName =>
           headers.some(h => h.toLowerCase() === fieldName.toLowerCase())
         )
 
@@ -227,9 +428,14 @@ export default function BatchWizard() {
         }
       }
 
-      setError(null)
+      setRichError(null)
     } catch (err) {
-      setError('Failed to parse CSV file. Please check the format and try again.')
+      setRichError({
+        tier: 'system',
+        title: 'Failed to parse file',
+        message: 'Could not read your CSV file. Please check the format and try again.',
+        showSupport: true,
+      })
       console.error(err)
     }
   }
@@ -247,9 +453,9 @@ export default function BatchWizard() {
 
   function validateRecipients(rows: RecipientRow[], mapping: ColumnMapping) {
     const errors: number[] = []
-    
+
     rows.forEach((row, index) => {
-      const hasError = Object.entries(mapping).some(([fieldName, columnName]) => {
+      const hasError = Object.entries(mapping).some(([, columnName]) => {
         const value = row[columnName]
         return !value || value.trim() === ''
       })
@@ -261,40 +467,91 @@ export default function BatchWizard() {
     setValidationErrors(errors)
   }
 
-  function handleStep2Continue() {
-    if (!csvFile) {
-      setError('Please upload a CSV file')
+  async function handleStep2Continue() {
+    if (!csvFile && recipients.length === 0) {
+      setRichError({
+        tier: 'user',
+        title: 'No recipients uploaded',
+        message: 'Please upload a CSV file or select a contact list before continuing.',
+      })
       return
     }
 
     if (needsMapping) {
       const allMapped = Object.values(columnMapping).every(v => v !== '')
       if (!allMapped) {
-        setError('Please map all fields before continuing')
+        setRichError({
+          tier: 'user',
+          title: 'Column mapping incomplete',
+          message: 'Please map all template fields to CSV columns before continuing.',
+        })
         return
       }
     }
 
     if (validationErrors.length > 0) {
-      setError(`${validationErrors.length} row${validationErrors.length === 1 ? ' has' : 's have'} missing required data. Please fix your CSV and upload again.`)
+      setRichError({
+        tier: 'user',
+        title: `${validationErrors.length} row${validationErrors.length === 1 ? ' has' : 's have'} missing data`,
+        message: 'Some rows are missing required field values. Please fix your CSV and upload again.',
+      })
       return
     }
 
     if (!batchName.trim()) {
-      setError('Please enter a batch name')
+      setRichError({
+        tier: 'user',
+        title: 'Batch name required',
+        message: 'Please enter a name for this batch.',
+      })
       return
     }
+
+    // Check for duplicate emails
+    const emails = recipients
+      .map(r => r['Email'] || r['email'] || '')
+      .filter(Boolean)
+    await checkForDuplicates(emails)
 
     // Prepare preview recipients (first 3)
     const mapped = recipients.map(row => {
       const mappedRow: RecipientRow = {}
-      Object.entries(columnMapping).forEach(([fieldName, columnName]) => {
-        mappedRow[fieldName] = row[columnName]
-      })
+      if (Object.keys(columnMapping).length > 0) {
+        Object.entries(columnMapping).forEach(([fieldName, columnName]) => {
+          mappedRow[fieldName] = row[columnName]
+        })
+      } else {
+        // If no mapping needed (from contact picker), use row directly
+        return row
+      }
       return mappedRow
     })
     setPreviewRecipients(mapped.slice(0, 3))
+    setRichError(null)
     setStep(3)
+  }
+
+  // ─── Contact picker handler ──────────────────────────────────────────────
+
+  function handleContactsSelected(rows: RecipientRow[]) {
+    setRecipients(rows)
+    // Auto-build column mapping from the first row keys
+    if (rows.length > 0 && selectedTemplate) {
+      const rowKeys = Object.keys(rows[0])
+      const mapping: ColumnMapping = {}
+      const templateFieldNames = selectedTemplate.fields.map(f => f.name)
+      templateFieldNames.forEach(fieldName => {
+        const match = rowKeys.find(k => k.toLowerCase() === fieldName.toLowerCase())
+        mapping[fieldName] = match || rowKeys[0] || ''
+      })
+      setColumnMapping(mapping)
+      setNeedsMapping(false)
+      validateRecipients(rows, mapping)
+    }
+    // Create a dummy file indicator
+    setCsvFile(new File([''], 'contacts.csv', { type: 'text/csv' }))
+    setShowContactPicker(false)
+    setRichError(null)
   }
 
   // ─── Step 3: Preview ──────────────────────────────────────────────────────
@@ -309,7 +566,7 @@ export default function BatchWizard() {
     if (!selectedTemplate) return
 
     setLoading(true)
-    setError(null)
+    setRichError(null)
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -317,6 +574,7 @@ export default function BatchWizard() {
 
       // Map all recipients using column mapping
       const mappedRecipients = recipients.map(row => {
+        if (Object.keys(columnMapping).length === 0) return row
         const mappedRow: RecipientRow = {}
         Object.entries(columnMapping).forEach(([fieldName, columnName]) => {
           mappedRow[fieldName] = row[columnName]
@@ -324,18 +582,27 @@ export default function BatchWizard() {
         return mappedRow
       })
 
+      const isScheduled = sendOption === 'scheduled'
+      const batchStatus = isScheduled ? 'draft' : 'generating'
+
+      // Build batch payload
+      const batchPayload: Record<string, unknown> = {
+        user_id: user.id,
+        template_id: selectedTemplate.id,
+        name: batchName.trim(),
+        status: batchStatus,
+        recipient_count: mappedRecipients.length,
+        email_subject: emailSubject.trim(),
+        email_message: emailMessage.trim(),
+      }
+      if (category.trim()) batchPayload.category = category.trim()
+      if (expiryDate) batchPayload.expires_at = new Date(expiryDate).toISOString()
+      if (isScheduled && scheduledFor) batchPayload.scheduled_for = new Date(scheduledFor).toISOString()
+
       // Create batch
       const { data: batch, error: batchError } = await supabase
         .from('batches')
-        .insert({
-          user_id: user.id,
-          template_id: selectedTemplate.id,
-          name: batchName.trim(),
-          status: 'generating',
-          recipient_count: mappedRecipients.length,
-          email_subject: emailSubject.trim(),
-          email_message: emailMessage.trim(),
-        })
+        .insert(batchPayload)
         .select()
         .single()
 
@@ -345,7 +612,7 @@ export default function BatchWizard() {
       const certificateRecords = mappedRecipients.map(recipient => ({
         batch_id: batch.id,
         user_id: user.id,
-        recipient_name: recipient[selectedTemplate.fields[0].name] || 'Unknown',
+        recipient_name: recipient[selectedTemplate.fields[0].name] || recipient['Name'] || 'Unknown',
         recipient_email: recipient['Email'] || recipient['email'] || null,
         recipient_data: recipient,
         status: 'pending',
@@ -357,30 +624,67 @@ export default function BatchWizard() {
 
       if (certsError) throw certsError
 
-      // Trigger certificate generation via API route
-      try {
-        const generateResponse = await fetch('/api/batch/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batch_id: batch.id }),
-        })
+      // If scheduled, just redirect to dashboard
+      if (isScheduled) {
+        router.push('/dashboard')
+        return
+      }
 
-        if (!generateResponse.ok) {
-          console.error('Failed to trigger generation, but batch was created')
-          // Don't throw - batch was created successfully, generation can be retried
+      // Trigger certificate generation via API route
+      const generateResponse = await fetch('/api/batch/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batch_id: batch.id }),
+      })
+
+      if (!generateResponse.ok) {
+        const status = generateResponse.status
+
+        if (status === 402) {
+          // Revert batch to draft
+          await supabase.from('batches').update({ status: 'draft' }).eq('id', batch.id)
+          if (mounted.current) {
+            setRichError({
+              tier: 'user',
+              title: 'Quota exceeded',
+              message: "You've used all your certificate credits for this month. Upgrade your plan to send more.",
+              action: { label: 'Upgrade plan', onClick: () => router.push('/settings') },
+            })
+            setLoading(false)
+          }
+          return
         }
-      } catch (genError) {
-        console.error('Failed to trigger generation:', genError)
-        // Don't throw - batch was created successfully
+
+        // Revert batch to draft so the user can retry
+        await supabase.from('batches').update({ status: 'draft' }).eq('id', batch.id)
+        if (mounted.current) {
+          setRichError({
+            tier: 'system',
+            title: 'Generation failed to start',
+            message: 'Your batch was saved as a draft. Please try again.',
+            action: { label: 'Try again', onClick: handleGenerateAndSend },
+            showSupport: true,
+          })
+          setLoading(false)
+        }
+        return
       }
 
       // Redirect to tracking page
       router.push(`/batch/${batch.id}`)
-      
-    } catch (err) {
+
+    } catch (err: unknown) {
       console.error('Failed to create batch:', err)
-      setError('Something went wrong. Please try again.')
-      setLoading(false)
+      if (mounted.current) {
+        setRichError({
+          tier: 'system',
+          title: 'Something went wrong',
+          message: 'Your batch could not be created. Please try again.',
+          action: { label: 'Try again', onClick: handleGenerateAndSend },
+          showSupport: true,
+        })
+        setLoading(false)
+      }
     }
   }
 
@@ -388,8 +692,15 @@ export default function BatchWizard() {
 
   return (
     <div className="min-h-screen bg-[#F7F8FC] px-6 py-8">
+      {showContactPicker && (
+        <ContactListPicker
+          onClose={() => setShowContactPicker(false)}
+          onSelect={handleContactsSelected}
+        />
+      )}
+
       <div className="max-w-4xl mx-auto">
-        
+
         {/* Step Indicator */}
         <div className="flex items-center justify-center gap-2 mb-8">
           {[
@@ -422,15 +733,15 @@ export default function BatchWizard() {
         </div>
 
         {/* Error Message */}
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">
-            {error}
+        {richError && (
+          <div className="mb-6">
+            <ErrorMessage {...richError} />
           </div>
         )}
 
         {/* Step Content */}
         <div className="bg-white border border-[#E8ECF4] rounded-xl shadow-sm p-8">
-          
+
           {/* ═══════════════════ STEP 1: CHOOSE TEMPLATE ═══════════════════ */}
           {step === 1 && (
             <div>
@@ -476,7 +787,7 @@ export default function BatchWizard() {
                             </svg>
                           </div>
                         )}
-                        
+
                         <div className="aspect-[16/11] bg-gray-50 rounded-lg mb-3 overflow-hidden">
                           {template.thumbnail_url ? (
                             <Image
@@ -495,7 +806,7 @@ export default function BatchWizard() {
                             </div>
                           )}
                         </div>
-                        
+
                         <h3 className="font-semibold text-sm text-gray-900 mb-1">{template.name}</h3>
                         <p className="text-xs text-gray-400">{template.fields.length} field{template.fields.length === 1 ? '' : 's'}</p>
                       </button>
@@ -557,6 +868,30 @@ export default function BatchWizard() {
                 </div>
               </div>
 
+              {/* Use a saved contact list button */}
+              <button
+                onClick={() => setShowContactPicker(true)}
+                className="flex items-center gap-2 w-full p-4 mb-4 border-2 border-dashed border-primary/30 rounded-xl hover:border-primary hover:bg-primary/5 transition text-left group"
+              >
+                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <circle cx="6" cy="5" r="2.5" stroke="#3B5BDB" strokeWidth="1.5"/>
+                    <path d="M1 13c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="#3B5BDB" strokeWidth="1.5" strokeLinecap="round"/>
+                    <path d="M12 7v4M14 9h-4" stroke="#3B5BDB" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-primary">Use a saved contact list</p>
+                  <p className="text-xs text-gray-400">Import from your contacts</p>
+                </div>
+              </button>
+
+              <div className="flex items-center gap-3 mb-4">
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-xs text-gray-400 font-medium">or upload a file</span>
+                <div className="flex-1 h-px bg-gray-200" />
+              </div>
+
               {/* Download Sample */}
               <button
                 onClick={generateSampleCSV}
@@ -614,6 +949,7 @@ export default function BatchWizard() {
                         setColumnMapping({})
                         setNeedsMapping(false)
                         setValidationErrors([])
+                        setDuplicateWarning(null)
                       }}
                       className="text-sm text-gray-400 hover:text-gray-600 transition"
                     >
@@ -672,7 +1008,7 @@ export default function BatchWizard() {
                               >
                                 {selectedTemplate.fields.map(field => (
                                   <td key={field.id} className="px-3 py-2 text-gray-700">
-                                    {row[columnMapping[field.name]] || <span className="text-red-500">Missing</span>}
+                                    {(columnMapping[field.name] ? row[columnMapping[field.name]] : row[field.name]) || <span className="text-red-500">Missing</span>}
                                   </td>
                                 ))}
                               </tr>
@@ -709,6 +1045,18 @@ export default function BatchWizard() {
                     </div>
                   )}
 
+                  {/* Duplicate Warning */}
+                  {duplicateWarning && (
+                    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
+                      <p className="text-sm font-medium text-yellow-900 mb-1">Possible duplicate send</p>
+                      <p className="text-sm text-yellow-800">
+                        {duplicateWarning.overlap} recipient{duplicateWarning.overlap === 1 ? '' : 's'} may have already received a certificate
+                        from batch &quot;{duplicateWarning.batchName}&quot; on {duplicateWarning.sentAt}.
+                        You can continue anyway if this is intentional.
+                      </p>
+                    </div>
+                  )}
+
                   {/* Batch Name */}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1.5">Batch name</label>
@@ -719,6 +1067,23 @@ export default function BatchWizard() {
                       placeholder="e.g. Q1 2024 Graduates"
                       className="w-full px-4 py-2.5 rounded-[10px] border border-[#E8ECF4] text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                     />
+                  </div>
+
+                  {/* Category */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                      Category / Course <span className="text-gray-300 font-normal">(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      placeholder="e.g. Web Development, Safety Training"
+                      className="w-full px-4 py-2.5 rounded-[10px] border border-[#E8ECF4] text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      Auto-fills &quot;Course&quot; or &quot;Category&quot; fields in your template
+                    </p>
                   </div>
                 </div>
               )}
@@ -733,7 +1098,7 @@ export default function BatchWizard() {
                 </button>
                 <button
                   onClick={handleStep2Continue}
-                  disabled={!csvFile || (needsMapping && Object.values(columnMapping).some(v => !v)) || validationErrors.length > 0}
+                  disabled={(!csvFile && recipients.length === 0) || (needsMapping && Object.values(columnMapping).some(v => !v)) || validationErrors.length > 0}
                   className="px-4 py-2.5 rounded-[10px] bg-primary text-white text-sm font-semibold hover:bg-primary/90 active:scale-[0.99] transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Continue →
@@ -767,7 +1132,6 @@ export default function BatchWizard() {
                               <p
                                 key={field.id}
                                 className="text-center px-4"
-                                // eslint-disable-next-line react/no-unknown-property
                                 style={{
                                   color: field.color,
                                   fontFamily: field.font === 'Playfair Display' ? '"Playfair Display", serif' : '"Outfit", sans-serif',
@@ -787,7 +1151,6 @@ export default function BatchWizard() {
                             <p
                               key={field.id}
                               className="mb-2"
-                              // eslint-disable-next-line react/no-unknown-property
                               style={{
                                 color: field.color,
                                 fontFamily: field.font === 'Playfair Display' ? 'serif' : 'sans-serif',
@@ -807,7 +1170,7 @@ export default function BatchWizard() {
 
               <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl mb-6 text-center">
                 <p className="text-sm text-blue-900">
-                  Previewing 3 of {recipients.length} certificate{recipients.length === 1 ? '' : 's'}. Happy with how they look?
+                  Previewing {Math.min(3, recipients.length)} of {recipients.length} certificate{recipients.length === 1 ? '' : 's'}. Happy with how they look?
                 </p>
               </div>
 
@@ -858,8 +1221,14 @@ export default function BatchWizard() {
                   <div className="flex-1">
                     <h3 className="font-semibold text-gray-900 mb-1">{batchName}</h3>
                     <p className="text-sm text-gray-500 mb-2">Using template: {selectedTemplate.name}</p>
-                    <div className="flex items-center gap-4 text-xs text-gray-400">
+                    <div className="flex items-center gap-4 text-xs text-gray-400 flex-wrap">
                       <span>{recipients.length} recipient{recipients.length === 1 ? '' : 's'}</span>
+                      {category && (
+                        <>
+                          <span>•</span>
+                          <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-full font-medium">{category}</span>
+                        </>
+                      )}
                       <span>•</span>
                       <span className="text-green-600 font-medium">Ready to send</span>
                     </div>
@@ -893,13 +1262,79 @@ export default function BatchWizard() {
                     <span className="font-medium">[Recipient Name]</span> will be replaced with each person's actual name
                   </p>
                 </div>
+
+                {/* Expiry Date */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                    Certificate expiry date <span className="text-gray-300 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={expiryDate}
+                    onChange={(e) => setExpiryDate(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-[10px] border border-[#E8ECF4] text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                  <p className="text-xs text-gray-400 mt-1.5">
+                    Auto-fills &quot;Expiry&quot; or &quot;Valid Until&quot; fields in your template
+                  </p>
+                </div>
+              </div>
+
+              {/* Scheduling Options */}
+              <div className="p-4 bg-gray-50 rounded-xl mb-6">
+                <p className="text-xs font-semibold text-gray-700 mb-3">When to send</p>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="sendOption"
+                      value="now"
+                      checked={sendOption === 'now'}
+                      onChange={() => setSendOption('now')}
+                      className="w-4 h-4 text-primary"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Send now</p>
+                      <p className="text-xs text-gray-400">Certificates will be generated and sent immediately</p>
+                    </div>
+                  </label>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="sendOption"
+                      value="scheduled"
+                      checked={sendOption === 'scheduled'}
+                      onChange={() => setSendOption('scheduled')}
+                      className="w-4 h-4 text-primary"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Schedule for later</p>
+                      <p className="text-xs text-gray-400">Save as draft and send at a specific time</p>
+                    </div>
+                  </label>
+                </div>
+
+                {sendOption === 'scheduled' && (
+                  <div className="mt-3 pt-3 border-t border-[#E8ECF4]">
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Scheduled date & time</label>
+                    <input
+                      type="datetime-local"
+                      value={scheduledFor}
+                      onChange={(e) => setScheduledFor(e.target.value)}
+                      min={new Date().toISOString().slice(0, 16)}
+                      className="w-full px-4 py-2.5 rounded-[10px] border border-[#E8ECF4] text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Send Button */}
               <button
                 onClick={handleGenerateAndSend}
-                disabled={loading}
-                className="w-full py-3.5 rounded-[10px] bg-green-600 text-white text-sm font-semibold hover:bg-green-700 active:scale-[0.99] transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                disabled={loading || (sendOption === 'scheduled' && !scheduledFor)}
+                className={`w-full py-3.5 rounded-[10px] text-white text-sm font-semibold active:scale-[0.99] transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
+                  sendOption === 'scheduled' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'
+                }`}
               >
                 {loading ? (
                   <>
@@ -907,16 +1342,18 @@ export default function BatchWizard() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                     </svg>
-                    Creating certificates...
+                    {sendOption === 'scheduled' ? 'Scheduling...' : 'Creating certificates...'}
                   </>
                 ) : (
                   <>
-                    Generate & Send All Certificates 🎉
+                    {sendOption === 'scheduled'
+                      ? 'Schedule Batch'
+                      : 'Generate & Send All Certificates'}
                   </>
                 )}
               </button>
 
-              {loading && (
+              {loading && sendOption === 'now' && (
                 <p className="text-center text-sm text-gray-500 mt-4">
                   Creating {recipients.length} certificate{recipients.length === 1 ? '' : 's'}... this usually takes 1–2 minutes.
                   <br />

@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
-    
+
     // Check authentication
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
@@ -14,27 +14,18 @@ export async function POST(request: Request) {
       )
     }
 
-    // Delete user's profile (cascading deletes will handle related data)
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('user_id', user.id)
-
-    if (profileError) {
-      console.error('Error deleting profile:', profileError)
-      return NextResponse.json(
-        { error: 'Failed to delete profile' },
-        { status: 500 }
-      )
-    }
-
-    // Delete user from auth
+    // Delete auth user first — the ON DELETE CASCADE on the profiles FK
+    // automatically removes the profile row and all related data.
+    // This order is safe: if auth deletion fails we return an error before
+    // any data is touched; if it succeeds, the cascade handles everything else.
     const { error: authError } = await supabase.auth.admin.deleteUser(user.id)
 
     if (authError) {
-      console.error('Error deleting user from auth:', authError)
-      // Note: Profile is already deleted, but auth deletion failed
-      // In production, you might want to log this for manual cleanup
+      console.error('Error deleting user:', authError)
+      return NextResponse.json(
+        { error: 'Failed to delete account' },
+        { status: 500 }
+      )
     }
 
     return NextResponse.json({ success: true })

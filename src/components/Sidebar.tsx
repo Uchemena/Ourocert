@@ -1,3 +1,4 @@
+// src/components/Sidebar.tsx
 'use client'
 
 import Link from 'next/link'
@@ -7,6 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', parent: '/dashboard', icon: GridIcon },
   { href: '/templates', label: 'Templates', parent: '/templates', icon: TemplatesIcon },
+  { href: '/contacts', label: 'Contacts', parent: '/contacts', icon: ContactsIcon },
   { href: '/batch/new', label: 'New Batch', parent: '/batch', icon: PlusCircleIcon },
   { href: '/settings', label: 'Settings', parent: '/settings', icon: SettingsIcon },
 ]
@@ -131,6 +133,16 @@ function TemplatesIcon() {
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
       <rect x="2" y="1.5" width="12" height="13" rx="2" stroke="currentColor" strokeWidth="1.5" />
       <path d="M4.5 5.5h7M4.5 8h7M4.5 10.5h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function ContactsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <circle cx="6" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.5"/>
+      <path d="M1 13c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      <path d="M12 7v4M14 9h-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
     </svg>
   )
 }

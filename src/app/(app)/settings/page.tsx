@@ -1,3 +1,4 @@
+// src/app/(app)/settings/page.tsx
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
@@ -5,6 +6,8 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useToast } from '@/components/ToastProvider'
 import { useRouter } from 'next/navigation'
+import ErrorMessage from '@/components/ErrorMessage'
+import type { RichError } from '@/components/ErrorMessage'
 
 type Profile = {
   full_name: string
@@ -43,7 +46,7 @@ export default function SettingsPage() {
       const { data } = await supabase
         .from('profiles')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('id', user.id)
         .single()
 
       if (data) setProfile(data as Profile)
@@ -130,11 +133,11 @@ export default function SettingsPage() {
 }
 
 // Profile Tab Component
-function ProfileTab({ 
-  profile, 
-  onUpdate, 
-  showToast 
-}: { 
+function ProfileTab({
+  profile,
+  onUpdate,
+  showToast
+}: {
   profile: Profile
   onUpdate: () => void
   showToast: (message: string, type: 'success' | 'error') => void
@@ -145,6 +148,7 @@ function ProfileTab({
   const [logoUrl, setLogoUrl] = useState(profile.logo_url || '')
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [saveError, setSaveError] = useState<RichError | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const industries = [
@@ -163,6 +167,7 @@ function ProfileTab({
     }
 
     setSaving(true)
+    setSaveError(null)
     try {
       const response = await fetch('/api/profile/update', {
         method: 'POST',
@@ -182,7 +187,13 @@ function ProfileTab({
       onUpdate()
     } catch (error) {
       console.error('Error updating profile:', error)
-      showToast('Failed to update profile', 'error')
+      setSaveError({
+        tier: 'system',
+        title: "Couldn't save your profile",
+        message: 'Your profile changes could not be saved right now. Please try again.',
+        action: { label: 'Try again', onClick: handleSave },
+        showSupport: true,
+      })
     } finally {
       setSaving(false)
     }
@@ -233,7 +244,7 @@ function ProfileTab({
       {/* Organization Logo */}
       <div className="bg-white border border-[#E8ECF4] rounded-xl shadow-sm p-6">
         <h3 className="text-lg font-bold text-gray-900 mb-4">Organization Logo</h3>
-        
+
         <div className="flex items-start gap-6 flex-col sm:flex-row">
           <div className="flex-shrink-0">
             {logoUrl ? (
@@ -250,7 +261,7 @@ function ProfileTab({
               </div>
             )}
           </div>
-          
+
           <div className="flex-1">
             <input
               ref={fileInputRef}
@@ -287,7 +298,7 @@ function ProfileTab({
       {/* Profile Information */}
       <div className="bg-white border border-[#E8ECF4] rounded-xl shadow-sm p-6">
         <h3 className="text-lg font-bold text-gray-900 mb-4">Profile Information</h3>
-        
+
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -334,6 +345,12 @@ function ProfileTab({
           </div>
         </div>
 
+        {saveError && (
+          <div className="mt-4">
+            <ErrorMessage {...saveError} />
+          </div>
+        )}
+
         <button
           onClick={handleSave}
           disabled={saving}
@@ -357,11 +374,11 @@ function ProfileTab({
 }
 
 // Email Defaults Tab Component
-function EmailDefaultsTab({ 
-  profile, 
-  onUpdate, 
-  showToast 
-}: { 
+function EmailDefaultsTab({
+  profile,
+  onUpdate,
+  showToast
+}: {
   profile: Profile
   onUpdate: () => void
   showToast: (message: string, type: 'success' | 'error') => void
@@ -370,13 +387,14 @@ function EmailDefaultsTab({
     profile.default_email_subject || 'Your certificate from {org_name}'
   )
   const [message, setMessage] = useState(
-    profile.default_email_message || 
+    profile.default_email_message ||
     'Hi {recipient_name},\n\nPlease find your certificate attached. Congratulations on your achievement!\n\nBest regards,\n{org_name}'
   )
   const [signature, setSignature] = useState(
     profile.default_email_signature || 'This certificate was issued by {org_name}.'
   )
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<RichError | null>(null)
 
   async function handleSave() {
     if (!subject || !message) {
@@ -385,6 +403,7 @@ function EmailDefaultsTab({
     }
 
     setSaving(true)
+    setSaveError(null)
     try {
       const response = await fetch('/api/profile/update-email-defaults', {
         method: 'POST',
@@ -404,7 +423,13 @@ function EmailDefaultsTab({
       onUpdate()
     } catch (error) {
       console.error('Error updating email defaults:', error)
-      showToast('Failed to update email defaults', 'error')
+      setSaveError({
+        tier: 'system',
+        title: "Couldn't save email defaults",
+        message: 'Your email defaults could not be saved right now. Please try again.',
+        action: { label: 'Try again', onClick: handleSave },
+        showSupport: true,
+      })
     } finally {
       setSaving(false)
     }
@@ -413,11 +438,11 @@ function EmailDefaultsTab({
   const previewSubject = subject
     .replace('{org_name}', profile.org_name)
     .replace('{recipient_name}', 'John Doe')
-  
+
   const previewMessage = message
     .replace('{org_name}', profile.org_name)
     .replace('{recipient_name}', 'John Doe')
-  
+
   const previewSignature = signature
     .replace('{org_name}', profile.org_name)
 
@@ -429,7 +454,7 @@ function EmailDefaultsTab({
         <p className="text-sm text-gray-500 mb-6">
           These default values will pre-fill when you create a new batch. You can customize them for each batch.
         </p>
-        
+
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -480,6 +505,12 @@ function EmailDefaultsTab({
           </div>
         </div>
 
+        {saveError && (
+          <div className="mt-4">
+            <ErrorMessage {...saveError} />
+          </div>
+        )}
+
         <button
           onClick={handleSave}
           disabled={saving}
@@ -525,14 +556,14 @@ function EmailDefaultsTab({
 }
 
 // Account Tab Component
-function AccountTab({ 
-  profile, 
+function AccountTab({
+  profile,
   showToast,
   router
-}: { 
+}: {
   profile: Profile
   showToast: (message: string, type: 'success' | 'error') => void
-  router: any
+  router: ReturnType<typeof useRouter>
 }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -587,8 +618,8 @@ function AccountTab({
   }
 
   const limits = getPlanLimits(profile.plan)
-  const usagePercent = limits.certificates === Infinity 
-    ? 0 
+  const usagePercent = limits.certificates === Infinity
+    ? 0
     : Math.min((profile.certificates_used_this_month / limits.certificates) * 100, 100)
 
   return (
@@ -629,8 +660,8 @@ function AccountTab({
               />
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              Resets on {new Date(profile.usage_reset_date).toLocaleDateString('en-US', { 
-                month: 'long', 
+              Resets on {new Date(profile.usage_reset_date).toLocaleDateString('en-US', {
+                month: 'long',
                 day: 'numeric',
                 year: 'numeric'
               })}
@@ -698,11 +729,11 @@ function AccountTab({
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
           onClick={() => !deleting && setShowDeleteModal(false)}
         >
-          <div 
+          <div
             className="bg-white rounded-xl shadow-xl max-w-md w-full p-6"
             onClick={(e) => e.stopPropagation()}
           >
@@ -750,4 +781,3 @@ function AccountTab({
     </div>
   )
 }
-

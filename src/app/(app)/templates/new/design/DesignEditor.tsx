@@ -1,3 +1,4 @@
+// src/app/(app)/templates/new/design/DesignEditor.tsx
 'use client'
 
 import { useState, useRef } from 'react'
@@ -11,6 +12,8 @@ import {
   FIELD_POSITIONS, FIELD_SIZES, FIELD_COLOR_PRESETS, DEFAULT_CERTIFICATE_FIELDS,
 } from '@/lib/certificate-types'
 import type { CertificateField, FieldPosition, FieldSize } from '@/lib/certificate-types'
+import ErrorMessage from '@/components/ErrorMessage'
+import type { RichError } from '@/components/ErrorMessage'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,7 +49,7 @@ export default function DesignEditor({ initialOrgName = '' }: Props) {
   // Save
   const [templateName, setTemplateName] = useState('')
   const [saving, setSaving]             = useState(false)
-  const [saveError, setSaveError]       = useState<string | null>(null)
+  const [saveError, setSaveError]       = useState<RichError | null>(null)
 
   // ── Field operations ──────────────────────────────────────────────────────
 
@@ -83,6 +86,19 @@ export default function DesignEditor({ initialOrgName = '' }: Props) {
     setSaveError(null)
 
     try {
+      const limitRes = await fetch('/api/templates/check-limit')
+      const limitData = await limitRes.json()
+      if (limitData.atLimit) {
+        setSaveError({
+          tier: 'user',
+          title: 'Template limit reached',
+          message: `You've reached the template limit for your plan (${limitData.limit}). Please upgrade to create more templates.`,
+          action: { label: 'Upgrade plan', onClick: () => router.push('/settings') },
+        })
+        setSaving(false)
+        return
+      }
+
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not authenticated')
 
@@ -124,7 +140,13 @@ export default function DesignEditor({ initialOrgName = '' }: Props) {
 
       router.push('/templates')
     } catch {
-      setSaveError('Something went wrong saving your template. Please try again.')
+      setSaveError({
+        tier: 'system',
+        title: "Couldn't save your template",
+        message: "Your template couldn't be saved right now. Please try again — your design has not been lost.",
+        action: { label: 'Try again', onClick: handleSave },
+        showSupport: true,
+      })
       setSaving(false)
     }
   }
@@ -217,7 +239,9 @@ export default function DesignEditor({ initialOrgName = '' }: Props) {
               <CertificatePreview ref={previewRef} config={certConfig} />
             </div>
 
-            {saveError && <p className="text-xs text-red-500">{saveError}</p>}
+            {saveError && (
+              <ErrorMessage {...saveError} />
+            )}
 
             <div className="flex gap-3 pt-1">
               <button

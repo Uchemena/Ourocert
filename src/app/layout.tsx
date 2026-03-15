@@ -2,6 +2,11 @@ import type { Metadata } from 'next'
 import { Outfit, Playfair_Display } from 'next/font/google'
 import './globals.css'
 import { ToastProvider } from '@/components/ToastProvider'
+import { validateEnv } from '@/lib/env'
+
+if (process.env.NODE_ENV === 'production') {
+  validateEnv()
+}
 
 const outfit = Outfit({
   variable: '--font-outfit',
