@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-12-18.acacia' as any
+  apiVersion: '2026-02-25.clover'
 })
 
 // Use service role key for webhook handler (bypasses RLS)

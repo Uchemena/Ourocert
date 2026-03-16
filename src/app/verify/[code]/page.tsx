@@ -17,13 +17,14 @@ interface VerifyResult {
 export default async function VerifyPage({
   params,
 }: {
-  params: { code: string }
+  params: Promise<{ code: string }>
 }) {
+  const { code } = await params
   let result: VerifyResult = { valid: false, message: 'Unable to verify certificate.' }
 
   try {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
-    const res = await fetch(`${baseUrl}/api/verify/${params.code}`, {
+    const res = await fetch(`${baseUrl}/api/verify/${code}`, {
       cache: 'no-store',
     })
     result = await res.json()
