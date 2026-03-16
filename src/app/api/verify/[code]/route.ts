@@ -9,8 +9,9 @@ const supabase = createClient(
 
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { code: string } }
+  { params }: { params: Promise<{ code: string }> }
 ) {
+  const { code } = await params
   const { data: certificate } = await supabase
     .from('certificates')
     .select(`
@@ -26,7 +27,7 @@ export async function GET(
         )
       )
     `)
-    .eq('verification_code', params.code)
+    .eq('verification_code', code)
     .in('status', ['sent', 'delivered', 'opened'])
     .single()
 
