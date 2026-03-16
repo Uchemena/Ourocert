@@ -37,7 +37,7 @@ export async function GET(
     )
   }
 
-  const batch = certificate.batch as {
+  const batch = certificate.batch as unknown as {
     name: string
     category: string | null
     template: { org_name: string | null } | null
