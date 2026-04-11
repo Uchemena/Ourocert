@@ -32,8 +32,18 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  // Protect everything except /auth and its sub-routes
-  const isPublic = pathname.startsWith('/auth')
+  // Public routes — no auth required
+  // /auth        → sign-in / sign-up
+  // /verify      → public certificate verification page
+  // /api/verify  → public certificate verification API
+  // /api/resend  → Resend webhook (signed)
+  // /api/stripe/webhook → Stripe webhook (signed)
+  const isPublic =
+    pathname.startsWith('/auth') ||
+    pathname.startsWith('/verify') ||
+    pathname.startsWith('/api/verify') ||
+    pathname.startsWith('/api/resend') ||
+    pathname === '/api/stripe/webhook'
   const isProtected = !isPublic
 
   // Unauthenticated → send to /auth

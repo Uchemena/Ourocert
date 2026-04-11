@@ -2,15 +2,30 @@ import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2026-02-25.clover'
-})
+// Force dynamic — webhooks are runtime-only, never build-time
+export const dynamic = 'force-dynamic'
 
-// Use service role key for webhook handler (bypasses RLS)
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Lazy singletons — never instantiate at module load so missing env vars
+// during the Next.js build's "Collecting page data" step don't blow up.
+let _stripe: Stripe | null = null
+function getStripe(): Stripe {
+  if (_stripe) return _stripe
+  _stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    apiVersion: '2026-02-25.clover'
+  })
+  return _stripe
+}
+
+let _supabase: any = null
+function getSupabase(): any {
+  if (_supabase) return _supabase
+  // Use service role key for webhook handler (bypasses RLS)
+  _supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  return _supabase
+}
 
 // Plan mapping based on price IDs
 const PLAN_MAP: Record<string, string> = {
@@ -23,6 +38,9 @@ const PLAN_MAP: Record<string, string> = {
 }
 
 export async function POST(request: NextRequest) {
+  const stripe = getStripe()
+  const supabase = getSupabase()
+
   const body = await request.text()
   const signature = request.headers.get('stripe-signature')
 

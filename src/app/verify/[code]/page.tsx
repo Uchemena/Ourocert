@@ -1,4 +1,8 @@
-import Link from 'next/link'
+import { createClient } from '@supabase/supabase-js'
+
+// Force dynamic — verification depends on live data, never prerender
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,12 +26,52 @@ export default async function VerifyPage({
   const { code } = await params
   let result: VerifyResult = { valid: false, message: 'Unable to verify certificate.' }
 
+  // Query Supabase directly instead of self-fetching the API route. Self-fetching
+  // is fragile (needs an absolute URL) and was being blocked by middleware before
+  // /verify was added to the public allowlist.
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
-    const res = await fetch(`${baseUrl}/api/verify/${code}`, {
-      cache: 'no-store',
-    })
-    result = await res.json()
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+
+    const { data: certificate } = await supabase
+      .from('certificates')
+      .select(`
+        recipient_name,
+        status,
+        sent_at,
+        verification_code,
+        batch:batches (
+          name,
+          category,
+          template:templates (
+            org_name
+          )
+        )
+      `)
+      .eq('verification_code', code)
+      .in('status', ['sent', 'delivered', 'opened'])
+      .single()
+
+    if (certificate) {
+      const batch = certificate.batch as unknown as {
+        name: string
+        category: string | null
+        template: { org_name: string | null } | null
+      } | null
+
+      result = {
+        valid: true,
+        recipientName: certificate.recipient_name,
+        issuedBy: batch?.template?.org_name ?? 'Unknown',
+        courseName: batch?.category ?? batch?.name ?? 'Unknown',
+        issuedAt: certificate.sent_at,
+        verificationCode: certificate.verification_code,
+      }
+    } else {
+      result = { valid: false, message: 'Certificate not found or not yet issued' }
+    }
   } catch {
     // result stays as the default invalid state
   }

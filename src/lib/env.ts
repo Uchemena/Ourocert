@@ -15,7 +15,19 @@ export function requireEnv(name: string): string {
   return value
 }
 
+/**
+ * Validates that required environment variables are present.
+ *
+ * IMPORTANT: this is a no-op during the Next.js build phase. During
+ * `next build`, Next.js loads modules to collect page data — if we throw
+ * here, the entire deployment fails. Validation must happen at request
+ * time (e.g. inside a route handler) so that missing env vars are caught
+ * after the build artifact is up but before serving traffic.
+ */
 export function validateEnv(): void {
+  // Skip during build — page-data collection would otherwise crash the build
+  if (process.env.NEXT_PHASE === 'phase-production-build') return
+
   const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key])
   if (missing.length > 0) {
     throw new Error(

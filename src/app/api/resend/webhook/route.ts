@@ -5,10 +5,20 @@ import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Force dynamic — webhooks are runtime-only, never build-time
+export const dynamic = 'force-dynamic'
+
+// Lazy singleton — never instantiated at module load so missing env vars
+// during the Next.js build's "Collecting page data" step don't blow up.
+let _supabase: any = null
+function getSupabase(): any {
+  if (_supabase) return _supabase
+  _supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  return _supabase
+}
 
 // Map Resend event types to certificate statuses
 const STATUS_MAP: Record<string, string> = {
@@ -51,6 +61,7 @@ function verifySignature(
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabase()
     const body = await request.text()
 
     const webhookSecret = process.env.RESEND_WEBHOOK_SECRET ?? ''
